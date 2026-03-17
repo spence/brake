@@ -156,14 +156,11 @@ cargo run --example dynamic_triage
 cargo run --example prove_all
 ```
 
-### Docker (Linux)
+### Linux testing
 
-```sh
-docker build -t thread-lanes .
-docker run --rm --privileged thread-lanes
-```
-
-The `--privileged` flag is required for cgroup v2 access inside the container.
+The examples work on macOS natively. To test the Linux cgroup v2 backend, see
+[`examples/linux-docker/`](examples/linux-docker/) for a Dockerfile that builds
+and runs the full suite.
 
 ### Example output (macOS, 10 CPUs)
 
