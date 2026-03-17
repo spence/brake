@@ -8,7 +8,7 @@
 //! ```no_run
 //! use thread_lanes::{DefaultLanes, LaneManager};
 //!
-//! let mgr = LaneManager::<DefaultLanes>::new().unwrap();
+//! let mgr = LaneManager::new().unwrap();
 //! let h = mgr.spawn(DefaultLanes::Full, || loop {
 //!   std::hint::black_box(0u64.wrapping_add(1));
 //! }).unwrap();

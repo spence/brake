@@ -1,7 +1,7 @@
 use thread_lanes::{DefaultLanes, LaneManager, Lanes};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-  let mgr = LaneManager::<DefaultLanes>::new()?;
+  let mgr = LaneManager::new()?;
   let ncpus = mgr.online_cpus();
   println!("online CPUs: {}", ncpus);
 

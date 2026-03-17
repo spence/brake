@@ -6,6 +6,7 @@ use crate::error::Error;
 use crate::handle::{CpuTime, LaneStats, ThreadHandle};
 use crate::lanes::Lanes;
 use crate::platform::{self, PlatformBackend};
+use crate::DefaultLanes;
 
 /// Manages threads across lanes with platform-specific throttling.
 ///
@@ -14,13 +15,13 @@ use crate::platform::{self, PlatformBackend};
 /// ```no_run
 /// use thread_lanes::{DefaultLanes, LaneManager};
 ///
-/// let mgr = LaneManager::<DefaultLanes>::new().unwrap();
+/// let mgr = LaneManager::new().unwrap();
 /// let h = mgr.spawn(DefaultLanes::Full, || loop {
 ///   std::hint::black_box(0u64.wrapping_add(1));
 /// }).unwrap();
 /// mgr.move_thread(&h, DefaultLanes::Idle).unwrap();
 /// ```
-pub struct LaneManager<L: Lanes> {
+pub struct LaneManager<L: Lanes = DefaultLanes> {
   backend: Mutex<Box<dyn PlatformBackend>>,
   variants: &'static [L],
   variant_to_idx: HashMap<L, usize>,

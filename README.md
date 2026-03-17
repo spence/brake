@@ -49,7 +49,7 @@ hard caps — enforcement depends on contention from higher-priority threads.
 use thread_lanes::{DefaultLanes, LaneManager};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mgr = LaneManager::<DefaultLanes>::new()?;
+    let mgr = LaneManager::new()?;
 
     // Spawn a thread at full speed
     let h = mgr.spawn(DefaultLanes::Full, || loop {

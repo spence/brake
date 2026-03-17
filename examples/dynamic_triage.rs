@@ -1,7 +1,7 @@
 use thread_lanes::{DefaultLanes, LaneManager};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-  let mgr = LaneManager::<DefaultLanes>::new()?;
+  let mgr = LaneManager::new()?;
 
   let mut workers = Vec::new();
   for _ in 0..20 {

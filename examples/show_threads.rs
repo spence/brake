@@ -1,7 +1,7 @@
 use thread_lanes::{DefaultLanes, LaneManager};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-  let mgr = LaneManager::<DefaultLanes>::new()?;
+  let mgr = LaneManager::new()?;
 
   let fast = mgr.spawn(DefaultLanes::Full, || loop {
     std::hint::black_box(0u64.wrapping_add(1));
