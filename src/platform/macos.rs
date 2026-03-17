@@ -1,3 +1,14 @@
+//! macOS CPU constraint backend using Mach thread precedence policy.
+//!
+//! Uses `thread_policy_set` with `THREAD_PRECEDENCE_POLICY` to control scheduling priority.
+//! CPU fraction is linearly mapped to a Mach importance value: 0.0 → −127 (lowest),
+//! 1.0 → 63 (highest). The scheduler uses importance to determine priority when threads compete
+//! for CPU.
+//!
+//! This is relative priority, not a hard cap — a low-priority thread can still use full CPU if
+//! nothing else is running. Enforcement depends on contention from higher-priority threads.
+//! CPU time is read via `thread_info` with `THREAD_BASIC_INFO`.
+
 use std::collections::HashMap;
 use std::sync::Mutex;
 

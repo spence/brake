@@ -1,3 +1,13 @@
+//! Linux CPU constraint backend using cgroup v2.
+//!
+//! Creates a `thread-lanes` subtree under the process's current cgroup. Each lane is a child
+//! cgroup with `cgroup.type = threaded`. CPU fraction is converted to a `cpu.max` quota:
+//! `fraction * online_cpus * 100ms period`. Fraction 0.0 uses the kernel minimum (1ms per 100ms
+//! period); fraction 1.0 leaves `cpu.max` at the default (unrestricted).
+//!
+//! Threads are moved into lanes by writing their TID to `cgroup.threads`. This provides hard
+//! caps — enforcement is absolute regardless of contention.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
