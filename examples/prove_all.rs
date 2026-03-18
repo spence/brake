@@ -1,9 +1,13 @@
-use thread_lanes::{DefaultLanes, LaneManager};
+//! Demonstrates the full validation suite: saturation, demotion/promotion, and
+//! per-thread CPU accounting in one long-running proof-oriented example.
+
+use brake::{Brake, BrakeController};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-  let mgr = LaneManager::new()?;
-  let ncpus = mgr.online_cpus();
-  println!("=== thread-lanes prove_all ===");
+  let controller = BrakeController::new()?;
+  let ncpus = controller.online_cpus();
+  let cold_brake = Brake::custom(0.01)?;
+  println!("=== brake prove_all ===");
   println!("platform: {}", std::env::consts::OS);
   println!("online CPUs: {}", ncpus);
   println!();
@@ -16,26 +20,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut fg = Vec::new();
     for _ in 0..ncpus {
-      fg.push(mgr.spawn(DefaultLanes::Full, burner)?);
+      fg.push(controller.spawn(Brake::full(), burner)?);
     }
     let mut bg = Vec::new();
     for _ in 0..100 {
-      bg.push(mgr.spawn(DefaultLanes::Idle, burner)?);
+      bg.push(controller.spawn(cold_brake, burner)?);
     }
 
     println!("  warmup 5s...");
     std::thread::sleep(std::time::Duration::from_secs(5));
 
-    let t0 = thread_lanes::now_usec();
-    let fg_start = mgr.lane_stats(DefaultLanes::Full)?;
-    let bg_start = mgr.lane_stats(DefaultLanes::Idle)?;
+    let t0 = brake::now_usec();
+    let fg_start = controller.brake_stats(Brake::full())?;
+    let bg_start = controller.brake_stats(cold_brake)?;
 
     println!("  observing 10s...");
     std::thread::sleep(std::time::Duration::from_secs(10));
 
-    let wall = thread_lanes::now_usec() - t0;
-    let fg_end = mgr.lane_stats(DefaultLanes::Full)?;
-    let bg_end = mgr.lane_stats(DefaultLanes::Idle)?;
+    let wall = brake::now_usec() - t0;
+    let fg_end = controller.brake_stats(Brake::full())?;
+    let bg_end = controller.brake_stats(cold_brake)?;
 
     let fg_cpus = (fg_end.usage_usec - fg_start.usage_usec) as f64 / wall as f64;
     let bg_cpus = (bg_end.usage_usec - bg_start.usage_usec) as f64 / wall as f64;
@@ -45,8 +49,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  BG: {:.2} effective CPUs (100 threads)", bg_cpus);
     println!("  BG/FG ratio: {:.4}", ratio);
 
-    // On macOS (priority model), BG should get much less than FG
-    // On Linux (cgroup), Idle (0.0) gets OS minimum
     let ok = ratio < 0.5;
     println!("  RESULT: {}", if ok { "PASS" } else { "FAIL" });
     pass &= ok;
@@ -65,42 +67,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Filler threads for contention
     for _ in 0..ncpus {
-      mgr.spawn(DefaultLanes::Idle, burner)?;
+      controller.spawn(Brake::Background, burner)?;
     }
     for _ in 0..ncpus {
-      mgr.spawn(DefaultLanes::Full, burner)?;
+      controller.spawn(Brake::full(), burner)?;
     }
 
-    let target = mgr.spawn(DefaultLanes::Full, burner)?;
+    let target = controller.spawn(Brake::full(), burner)?;
 
     std::thread::sleep(std::time::Duration::from_secs(3));
 
-    // Phase 1: Full
-    let t0 = thread_lanes::now_usec();
-    let cpu0 = mgr.cpu_time(&target)?.total_usec;
+    let t0 = brake::now_usec();
+    let cpu0 = controller.cpu_time(&target)?.total_usec;
     std::thread::sleep(std::time::Duration::from_secs(10));
-    let cpu1 = mgr.cpu_time(&target)?.total_usec;
-    let wall1 = thread_lanes::now_usec() - t0;
+    let cpu1 = controller.cpu_time(&target)?.total_usec;
+    let wall1 = brake::now_usec() - t0;
     let slope_fg = (cpu1 - cpu0) as f64 / wall1 as f64;
     println!("  slope_fg = {:.4}", slope_fg);
 
-    // Phase 2: Demote
-    mgr.move_thread(&target, DefaultLanes::Idle)?;
-    let t1 = thread_lanes::now_usec();
-    let cpu2 = mgr.cpu_time(&target)?.total_usec;
+    controller.move_thread(&target, Brake::Background)?;
+    let t1 = brake::now_usec();
+    let cpu2 = controller.cpu_time(&target)?.total_usec;
     std::thread::sleep(std::time::Duration::from_secs(15));
-    let cpu3 = mgr.cpu_time(&target)?.total_usec;
-    let wall2 = thread_lanes::now_usec() - t1;
+    let cpu3 = controller.cpu_time(&target)?.total_usec;
+    let wall2 = brake::now_usec() - t1;
     let slope_bg = (cpu3 - cpu2) as f64 / wall2 as f64;
     println!("  slope_bg = {:.4}", slope_bg);
 
-    // Phase 3: Promote
-    mgr.move_thread(&target, DefaultLanes::Full)?;
-    let t2 = thread_lanes::now_usec();
-    let cpu4 = mgr.cpu_time(&target)?.total_usec;
+    controller.move_thread(&target, Brake::full())?;
+    let t2 = brake::now_usec();
+    let cpu4 = controller.cpu_time(&target)?.total_usec;
     std::thread::sleep(std::time::Duration::from_secs(10));
-    let cpu5 = mgr.cpu_time(&target)?.total_usec;
-    let wall3 = thread_lanes::now_usec() - t2;
+    let cpu5 = controller.cpu_time(&target)?.total_usec;
+    let wall3 = brake::now_usec() - t2;
     let slope_fg_after = (cpu5 - cpu4) as f64 / wall3 as f64;
     println!("  slope_fg_after = {:.4}", slope_fg_after);
 
@@ -123,15 +122,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   {
     println!("--- test 3: per-thread CPU accounting ---");
 
-    let fast = mgr.spawn(DefaultLanes::Full, burner)?;
-    let slow = mgr.spawn(DefaultLanes::Idle, burner)?;
+    let fast = controller.spawn(Brake::full(), burner)?;
+    let slow = controller.spawn(Brake::Background, burner)?;
 
     std::thread::sleep(std::time::Duration::from_secs(5));
 
-    let fast_cpu = mgr.cpu_time(&fast)?.total_usec;
-    let slow_cpu = mgr.cpu_time(&slow)?.total_usec;
+    let fast_cpu = controller.cpu_time(&fast)?.total_usec;
+    let slow_cpu = controller.cpu_time(&slow)?.total_usec;
     println!(
-      "  fast (Full): {:.3}s, slow (Idle): {:.3}s",
+      "  fast (Brake::full()): {:.3}s, slow (Background): {:.3}s",
       fast_cpu as f64 / 1e6,
       slow_cpu as f64 / 1e6
     );

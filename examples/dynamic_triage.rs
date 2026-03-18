@@ -1,11 +1,14 @@
-use thread_lanes::{DefaultLanes, LaneManager};
+//! Demonstrates a controller loop that watches worker CPU usage and demotes
+//! threads once they exceed a configured CPU budget.
+
+use brake::{Brake, BrakeController};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-  let mgr = LaneManager::new()?;
+  let controller = BrakeController::new()?;
 
   let mut workers = Vec::new();
   for _ in 0..20 {
-    workers.push(mgr.spawn(DefaultLanes::Full, || {
+    workers.push(controller.spawn(Brake::full(), || {
       let mut x: u64 = 0xdeadbeef;
       loop {
         x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
@@ -26,17 +29,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::thread::sleep(std::time::Duration::from_secs(1));
     let mut demoted = 0;
     for (i, h) in workers.iter().enumerate() {
-      if h.lane() == DefaultLanes::Full {
-        let cpu = mgr.cpu_time(h)?.total_usec;
+      if h.brake() == Brake::full() {
+        let cpu = controller.cpu_time(h)?.total_usec;
         if cpu > budget_usec {
-          mgr.move_thread(h, DefaultLanes::Idle)?;
+          controller.move_thread(h, Brake::Background)?;
           println!("  [t={}s] worker {} demoted (used {:.3}s CPU)", tick + 1, i, cpu as f64 / 1e6);
           demoted += 1;
         }
       }
     }
     if demoted == 0 {
-      let still_full = workers.iter().filter(|h| h.lane() == DefaultLanes::Full).count();
+      let still_full = workers.iter().filter(|h| h.brake() == Brake::full()).count();
       if still_full == 0 {
         println!("  [t={}s] all workers demoted", tick + 1);
         break;
@@ -46,8 +49,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   println!("\nfinal state:");
   for (i, h) in workers.iter().enumerate() {
-    let cpu = mgr.cpu_time(h)?.total_usec;
-    println!("  worker {:<3} lane={:?}  cpu={:.3}s", i, h.lane(), cpu as f64 / 1e6);
+    let cpu = controller.cpu_time(h)?.total_usec;
+    println!("  worker {:<3} brake={:?}  cpu={:.3}s", i, h.brake(), cpu as f64 / 1e6);
   }
 
   Ok(())

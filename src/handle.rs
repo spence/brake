@@ -1,19 +1,16 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use crate::lanes::Lanes;
+use crate::brake::Brake;
 
 #[derive(Debug, Clone)]
-pub struct ThreadHandle<L: Lanes> {
+pub struct ThreadHandle {
   pub(crate) os_id: u32,
-  pub(crate) lane_idx: Arc<AtomicUsize>,
-  pub(crate) lane_variants: &'static [L],
+  pub(crate) brake: Arc<Mutex<Brake>>,
 }
 
-impl<L: Lanes> ThreadHandle<L> {
-  pub fn lane(&self) -> L {
-    let idx = self.lane_idx.load(Ordering::Acquire);
-    self.lane_variants[idx]
+impl ThreadHandle {
+  pub fn brake(&self) -> Brake {
+    *self.brake.lock().unwrap()
   }
 
   pub fn os_id(&self) -> u32 {
@@ -27,7 +24,7 @@ pub struct CpuTime {
 }
 
 #[derive(Debug, Clone)]
-pub struct LaneStats {
+pub struct BrakeStats {
   pub usage_usec: u64,
   pub thread_count: usize,
 }

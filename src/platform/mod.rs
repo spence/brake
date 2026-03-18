@@ -1,12 +1,18 @@
+use crate::brake::Brake;
 use crate::error::Error;
 
 pub(crate) trait PlatformBackend: Send + Sync {
-  /// Set up OS resources. Each entry: (lane_index, cpu_fraction 0.0..1.0)
-  fn setup(&mut self, lanes: &[(usize, f64)]) -> Result<(), Error>;
-  fn move_thread(&self, os_id: u32, lane_idx: usize) -> Result<(), Error>;
-  fn read_lane_usage(&self, lane_idx: usize) -> Result<u64, Error>;
+  fn setup(&mut self) -> Result<(), Error>;
+  fn move_thread(&self, os_id: u32, brake: Brake) -> Result<(), Error>;
+  fn read_brake_usage(&self, brake: Brake) -> Result<u64, Error>;
   fn read_thread_cpu_usec(&self, os_id: u32) -> Result<u64, Error>;
-  fn register_thread(&self, os_id: u32, lane_idx: usize) -> Result<(), Error>;
+  fn register_thread(
+    &self,
+    os_id: u32,
+    thread_cpu_clock: Option<libc::clockid_t>,
+    brake: Brake,
+  ) -> Result<(), Error>;
+  fn unregister_thread(&self, os_id: u32) -> Result<(), Error>;
   fn online_cpus(&self) -> usize;
   fn cleanup(&self) -> Result<(), Error>;
 }

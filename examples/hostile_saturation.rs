@@ -1,14 +1,18 @@
-use thread_lanes::{DefaultLanes, LaneManager, Lanes};
+//! Demonstrates how many hostile low-brake threads can run alongside foreground
+//! workers before they materially eat into foreground CPU.
+
+use brake::{Brake, BrakeController};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-  let mgr = LaneManager::new()?;
-  let ncpus = mgr.online_cpus();
+  let controller = BrakeController::new()?;
+  let ncpus = controller.online_cpus();
+  let cold_brake = Brake::custom(0.01)?;
   println!("online CPUs: {}", ncpus);
 
   // Spawn foreground workers (enough to saturate)
   let mut fg = Vec::new();
   for _ in 0..ncpus {
-    fg.push(mgr.spawn(DefaultLanes::Full, || {
+    fg.push(controller.spawn(Brake::full(), || {
       let mut x: u64 = 0xdeadbeef;
       loop {
         x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
@@ -17,10 +21,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?);
   }
 
-  // Spawn 100 background workers (hostile — infinite CPU burn)
+  // Spawn 100 cold workers (hostile — infinite CPU burn)
   let mut bg = Vec::new();
   for _ in 0..100 {
-    bg.push(mgr.spawn(DefaultLanes::Idle, || {
+    bg.push(controller.spawn(cold_brake, || {
       let mut x: u64 = 0xcafebabe;
       loop {
         x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
@@ -32,16 +36,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   println!("warmup 5s...");
   std::thread::sleep(std::time::Duration::from_secs(5));
 
-  let t0 = thread_lanes::now_usec();
-  let fg_start = mgr.lane_stats(DefaultLanes::Full)?;
-  let bg_start = mgr.lane_stats(DefaultLanes::Idle)?;
+  let t0 = brake::now_usec();
+  let fg_start = controller.brake_stats(Brake::full())?;
+  let bg_start = controller.brake_stats(cold_brake)?;
 
   println!("observing 10s...");
   std::thread::sleep(std::time::Duration::from_secs(10));
 
-  let wall = thread_lanes::now_usec() - t0;
-  let fg_end = mgr.lane_stats(DefaultLanes::Full)?;
-  let bg_end = mgr.lane_stats(DefaultLanes::Idle)?;
+  let wall = brake::now_usec() - t0;
+  let fg_end = controller.brake_stats(Brake::full())?;
+  let bg_end = controller.brake_stats(cold_brake)?;
 
   let fg_cpu = fg_end.usage_usec - fg_start.usage_usec;
   let bg_cpu = bg_end.usage_usec - bg_start.usage_usec;
@@ -52,14 +56,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   println!(
     "  FG ({} threads, cpu={}): {:.3}s CPU = {:.2} effective CPUs",
     fg.len(),
-    DefaultLanes::Full.cpu(),
+    1.0,
     fg_cpu as f64 / 1e6,
     fg_cpus
   );
   println!(
     "  BG ({} threads, cpu={}): {:.3}s CPU = {:.2} effective CPUs",
     bg.len(),
-    DefaultLanes::Idle.cpu(),
+    0.01,
     bg_cpu as f64 / 1e6,
     bg_cpus
   );

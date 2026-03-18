@@ -7,11 +7,13 @@
 //!
 //! This is relative priority, not a hard cap — a low-priority thread can still use full CPU if
 //! nothing else is running. Enforcement depends on contention from higher-priority threads.
-//! CPU time is read via `thread_info` with `THREAD_BASIC_INFO`.
+//! `Brake::Stop` uses `thread_suspend` / `thread_resume`. CPU time is read via `thread_info`
+//! with `THREAD_BASIC_INFO`.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use crate::brake::Brake;
 use crate::error::Error;
 use crate::platform::PlatformBackend;
 
@@ -59,24 +61,22 @@ unsafe extern "C" {
     thread_info_out: *mut ThreadBasicInfo,
     thread_info_count: *mut u32,
   ) -> i32;
-}
-
-struct LaneConfig {
-  importance: i32,
+  fn thread_suspend(target_act: u32) -> i32;
+  fn thread_resume(target_act: u32) -> i32;
 }
 
 struct ThreadEntry {
-  lane_idx: usize,
+  brake: Brake,
+  suspended: bool,
 }
 
 pub(crate) struct MacosBackend {
-  lane_configs: Vec<LaneConfig>,
   threads: Mutex<HashMap<u32, ThreadEntry>>,
 }
 
 impl MacosBackend {
   pub(crate) fn new() -> Self {
-    Self { lane_configs: Vec::new(), threads: Mutex::new(HashMap::new()) }
+    Self { threads: Mutex::new(HashMap::new()) }
   }
 
   fn fraction_to_importance(frac: f64) -> i32 {
@@ -112,33 +112,58 @@ impl MacosBackend {
     let sys_us = info.system_time.seconds as u64 * 1_000_000 + info.system_time.microseconds as u64;
     Ok(user_us + sys_us)
   }
+
+  fn suspend_thread(mach_port: u32) -> Result<(), Error> {
+    let kr = unsafe { thread_suspend(mach_port) };
+    if kr != KERN_SUCCESS {
+      return Err(Error::Os(format!("thread_suspend failed: kern_return={}", kr)));
+    }
+    Ok(())
+  }
+
+  fn resume_thread(mach_port: u32) -> Result<(), Error> {
+    let kr = unsafe { thread_resume(mach_port) };
+    if kr != KERN_SUCCESS {
+      return Err(Error::Os(format!("thread_resume failed: kern_return={}", kr)));
+    }
+    Ok(())
+  }
+
+  fn brake_to_importance(brake: Brake) -> i32 {
+    Self::fraction_to_importance(brake.cpu_fraction().unwrap_or(0.0))
+  }
 }
 
 impl PlatformBackend for MacosBackend {
-  fn setup(&mut self, lanes: &[(usize, f64)]) -> Result<(), Error> {
-    self.lane_configs = lanes
-      .iter()
-      .map(|&(_, frac)| LaneConfig { importance: Self::fraction_to_importance(frac) })
-      .collect();
+  fn setup(&mut self) -> Result<(), Error> {
     Ok(())
   }
 
-  fn move_thread(&self, os_id: u32, lane_idx: usize) -> Result<(), Error> {
-    let config = self
-      .lane_configs
-      .get(lane_idx)
-      .ok_or_else(|| Error::Os(format!("invalid lane index {}", lane_idx)))?;
-    Self::set_thread_importance(os_id, config.importance)?;
+  fn move_thread(&self, os_id: u32, brake: Brake) -> Result<(), Error> {
     let mut threads = self.threads.lock().unwrap();
-    threads.insert(os_id, ThreadEntry { lane_idx });
+    let was_suspended = threads.get(&os_id).map(|entry| entry.suspended).unwrap_or(false);
+
+    if brake.is_stopped() {
+      if !was_suspended {
+        Self::suspend_thread(os_id)?;
+      }
+      threads.insert(os_id, ThreadEntry { brake, suspended: true });
+      return Ok(());
+    }
+
+    Self::set_thread_importance(os_id, Self::brake_to_importance(brake))?;
+    if was_suspended {
+      Self::resume_thread(os_id)?;
+    }
+    threads.insert(os_id, ThreadEntry { brake, suspended: false });
     Ok(())
   }
 
-  fn read_lane_usage(&self, lane_idx: usize) -> Result<u64, Error> {
+  fn read_brake_usage(&self, brake: Brake) -> Result<u64, Error> {
     let threads = self.threads.lock().unwrap();
     let mut total = 0u64;
     for (mach_port, entry) in threads.iter() {
-      if entry.lane_idx == lane_idx {
+      if entry.brake == brake {
         if let Ok(cpu_us) = Self::read_mach_thread_cpu_usec(*mach_port) {
           total += cpu_us;
         }
@@ -151,14 +176,17 @@ impl PlatformBackend for MacosBackend {
     Self::read_mach_thread_cpu_usec(os_id)
   }
 
-  fn register_thread(&self, os_id: u32, lane_idx: usize) -> Result<(), Error> {
-    let config = self
-      .lane_configs
-      .get(lane_idx)
-      .ok_or_else(|| Error::Os(format!("invalid lane index {}", lane_idx)))?;
-    Self::set_thread_importance(os_id, config.importance)?;
-    let mut threads = self.threads.lock().unwrap();
-    threads.insert(os_id, ThreadEntry { lane_idx });
+  fn register_thread(
+    &self,
+    os_id: u32,
+    _thread_cpu_clock: Option<libc::clockid_t>,
+    brake: Brake,
+  ) -> Result<(), Error> {
+    self.move_thread(os_id, brake)
+  }
+
+  fn unregister_thread(&self, os_id: u32) -> Result<(), Error> {
+    self.threads.lock().unwrap().remove(&os_id);
     Ok(())
   }
 
@@ -168,7 +196,10 @@ impl PlatformBackend for MacosBackend {
 
   fn cleanup(&self) -> Result<(), Error> {
     let mut threads = self.threads.lock().unwrap();
-    for (&mach_port, _) in threads.iter() {
+    for (&mach_port, entry) in threads.iter() {
+      if entry.suspended {
+        let _ = Self::resume_thread(mach_port);
+      }
       let _ = Self::set_thread_importance(mach_port, 0);
     }
     threads.clear();

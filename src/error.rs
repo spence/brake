@@ -4,6 +4,7 @@ use std::fmt;
 pub enum Error {
   Os(String),
   ThreadGone,
+  InvalidBrake(String),
 }
 
 impl fmt::Display for Error {
@@ -11,6 +12,7 @@ impl fmt::Display for Error {
     match self {
       Error::Os(msg) => write!(f, "OS error: {}", msg),
       Error::ThreadGone => write!(f, "thread no longer exists"),
+      Error::InvalidBrake(msg) => write!(f, "invalid brake: {}", msg),
     }
   }
 }

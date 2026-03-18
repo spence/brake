@@ -1,55 +1,31 @@
-//! Cross-platform thread lane management: configure, spawn, throttle.
+//! Cross-platform thread braking: configure, spawn, throttle.
 //!
-//! Implement the [`Lanes`] trait on your enum, spawn threads into lanes with
-//! [`LaneManager::spawn`], and move threads between lanes at runtime.
+//! Use the built-in [`Brake`] enum to spawn threads into stopped, background,
+//! or custom CPU fractions, then move them between brakes at runtime.
 //!
 //! # Example
 //!
 //! ```no_run
-//! use thread_lanes::{DefaultLanes, LaneManager};
+//! use brake::{Brake, BrakeController};
 //!
-//! let mgr = LaneManager::new().unwrap();
-//! let h = mgr.spawn(DefaultLanes::Full, || loop {
+//! let controller = BrakeController::new().unwrap();
+//! let worker = controller.spawn(Brake::full(), || loop {
 //!   std::hint::black_box(0u64.wrapping_add(1));
 //! }).unwrap();
-//! mgr.move_thread(&h, DefaultLanes::Idle).unwrap();
+//! controller.move_thread(&worker, Brake::Stop).unwrap();
+//! controller.move_thread(&worker, Brake::Background).unwrap();
 //! ```
 
+mod brake;
 mod error;
 mod handle;
-mod lanes;
 mod manager;
 mod platform;
 
+pub use crate::brake::{Brake, BrakeValue};
 pub use crate::error::Error;
-pub use crate::handle::{CpuTime, LaneStats, ThreadHandle};
-pub use crate::lanes::Lanes;
-pub use crate::manager::LaneManager;
-
-/// Default lane configuration shipped with the crate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum DefaultLanes {
-  /// Unrestricted CPU.
-  Full,
-  /// Throttled to 10% of a core.
-  Background,
-  /// As slow as the OS allows.
-  Idle,
-}
-
-impl Lanes for DefaultLanes {
-  fn cpu(&self) -> f64 {
-    match self {
-      Self::Full => 1.0,
-      Self::Background => 0.1,
-      Self::Idle => 0.0,
-    }
-  }
-
-  fn all() -> &'static [Self] {
-    &[Self::Full, Self::Background, Self::Idle]
-  }
-}
+pub use crate::handle::{BrakeStats, CpuTime, ThreadHandle};
+pub use crate::manager::BrakeController;
 
 /// Monotonic time in microseconds.
 pub fn now_usec() -> u64 {

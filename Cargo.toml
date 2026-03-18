@@ -1,8 +1,8 @@
 [package]
-name = "thread-lanes"
+name = "brake"
 version = "0.1.0"
 edition = "2021"
-description = "Cross-platform thread lane management: configure, spawn, throttle"
+description = "Cross-platform thread braking: configure, spawn, throttle"
 license = "MIT OR Apache-2.0"
 keywords = ["threads", "cgroup", "scheduling", "priority", "throttle"]
 categories = ["os", "concurrency"]
